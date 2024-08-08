@@ -12,10 +12,28 @@
 #include <csignal>
 #include <limits>
 #include <opencv2/opencv.hpp>
+#include "mixer_processor.h"
 
 // #include <pthread.h>
 
 #include "comms.h"
+
+#define APPLY_LOW_PASS_FILTER true // low pass filter the noise Set to false to disable low-pass filtering
+
+#define NUM_OF_NOISE_FRAMES 30
+
+#define FULLSCREEN_MODE false // Set to false for windowed mode
+
+#define SHOW_TIMING true // Show timing on screen
+
+#define NOISE_WEIGHT .6 // 0.5 // Adjust this value as needed (e.g., 0.33 for 1/3)
+
+#define OUTPUT_GAIN 1.8 // Adjust this value for output gain of the final image
+
+#define FADE_TIMER_TC 64  // Adjust this value for lenngth of fade
+
+#define FADE_TIME 38  // Adjust this value for lenngth of fade  nominal 38 frames
+
 
 inline bool ends_with(std::string const &value, std::string const &ending)
 {
@@ -40,8 +58,11 @@ void usage()
 
 int main(int argc, char *argv[])
 {
-
-
+    int Fade_Timer = 0;
+    // int Fade_Timer_TC = 64; //  at  30 fps  64/30 seconds
+    // int Fade_Time = 38;    
+    bool New_Image = false;
+    float Fade_Val = 0;
 
     // create a gradient for test image using a pointer
     int width = 1024;
@@ -54,21 +75,29 @@ int main(int argc, char *argv[])
     }
 
     // use memcopy to convert Jonathan's container to an opencv Mat   // had ame offset reults
-    // cv::Mat image(height, width, CV_8UC1);      // Create an empty cv::Mat with the desired dimensions
-    // memcpy(image.data, dataX, size * sizeof(uchar));      // Copy the data from the 1D array to the cv::Mat
+    cv::Mat image1(height, width, CV_8UC1);      // Create an empty cv::Mat with the desired dimensions
+    cv::Mat image2(height, width, CV_8UC1);      // Create an empty cv::Mat with the desired dimensions
+    // cv::Mat image_mixed(height, width, CV_8UC1); // Create an empty cv::Mat with the desired dimensions
+    // cv::Mat image_test(height, width, CV_8UC1);  // Create an empty cv::Mat with the desired dimensions
+    cv::Mat transformedImg(height, width, CV_8UC1);  // Create an empty cv::Mat with the desired dimensions
+    
+
+    // memcpy(image1.data, dataX, size * sizeof(uchar));      // Copy the data from the 1D array to the cv::Mat
+    // memcpy(image2.data, dataX, size * sizeof(uchar));      // Copy the data from the 1D array to the cv::Mat
+    // memcpy(image_test.data, dataX, size * sizeof(uchar));  // Copy the data from the 1D array to the cv::Mat
+    // memcpy(image_mixed.data, dataX, size * sizeof(uchar)); // Copy the data from the 1D array to the cv::Mat
 
     // creat 2 empty Mats
-    cv::Mat image, image_test;
-
+    // cv::Mat image, image_test;
 
     // for timing various things
     auto start_check = std::chrono::high_resolution_clock::now();
     auto end_check = std::chrono::high_resolution_clock::now();
     std::chrono::duration<double> elapsed = end_check - start_check;
 
-
-
-
+    auto start_check_2 = std::chrono::high_resolution_clock::now();
+    auto end_check_2 = std::chrono::high_resolution_clock::now();
+    std::chrono::duration<double> elapsed_2 = end_check_2 - start_check_2;
 
     usage();
 
@@ -106,8 +135,24 @@ int main(int argc, char *argv[])
     SD loop_sd;
     deque<MessageData *> cached_messages;
 
+
+
+
+    // generate noise
+    std::vector<cv::Mat> noiseFrames = generateNoiseFrames(image1.cols, image1.rows, NUM_OF_NOISE_FRAMES, APPLY_LOW_PASS_FILTER);
+    //  Create the parabolic lookup table for gamma correction
+    cv::Mat lut = createParabolicLUT();
+
+        if (FULLSCREEN_MODE)
+    {
+        cv::namedWindow("Blended Image Playback", cv::WINDOW_NORMAL);
+        cv::setWindowProperty("Blended Image Playback", cv::WND_PROP_FULLSCREEN, cv::WINDOW_FULLSCREEN); // Set window to fullscreen
+    }
+
+
     for (long loop_count = 0; loop_count < max_loop; loop_count++)
     {
+
         deque<MessageData *> to_delete;
         deque<MessageData *> received_messages;
         while (auto message_data = comm->next_received())
@@ -126,6 +171,8 @@ int main(int argc, char *argv[])
 
                 // for debugging
                 cout << "got image '" << message_data->image_name << "' sz:" << message_data->image_data.size() << endl;
+
+                New_Image = true;
 
                 image_count += 1;
 
@@ -166,19 +213,37 @@ int main(int argc, char *argv[])
             delete message_data;
         }
 
-        // do some processing of cached messages here
 
 
-        // try 2 ways of converting to an opencv Mat
-        
-        // memcpy(image.data, cached_messages[0], size * sizeof(uchar));
-        // image = cv::Mat(height, width, CV_8UC1, cached_messages[0]);
+        if (New_Image)
+        {
+            Fade_Timer = 0;
+            // image2 = image1.clone();
+            memcpy(image2.data, cached_messages[0]->image_data.c_str(), size * sizeof(uchar));
+            memcpy(image1.data, cached_messages[1]->image_data.c_str(), size * sizeof(uchar));
+            New_Image = false;
+            Fade_Val = 0;
+            // cout << " NEEEEEEEEEEEEEEEEEEEEEEEWWWWWWWW " << endl;
+        }
+        else
+        {
+            if (Fade_Timer < FADE_TIMER_TC)
+            {
+                Fade_Timer++;
+                Fade_Val = (float)(Fade_Timer <= FADE_TIME ? Fade_Timer : FADE_TIME) / (float)FADE_TIME;
+            }
+        }
 
-        image_test = cv::Mat(height, width, CV_8UC1, dataX);        
-        image = cv::Mat(height, width, CV_8UC1, cached_messages[0]);
+        // cv::addWeighted(image2, 1.0 - Fade_Val, image1, Fade_Val, 0, image_mixed);
+
+        blendImagesAndNoise(image1, image2, noiseFrames, transformedImg, lut, Fade_Val, NOISE_WEIGHT, OUTPUT_GAIN);
+
+        end_check_2 = std::chrono::high_resolution_clock::now();
+        elapsed_2 = end_check_2 - start_check_2;
+        cout << "elapsed_2: " <<  elapsed_2.count() << endl ;
 
 
-
+        // Loop Timer to set frame rate
         double goal = (loop_count + 1) / fps;
         Seconds elapsed = SteadyClock::now() - begin;
         if (elapsed.count() < goal)
@@ -186,24 +251,48 @@ int main(int argc, char *argv[])
             this_thread::sleep_for(std::chrono::duration<double>(goal - elapsed.count()));
         }
 
+
+
+        start_check_2 = std::chrono::high_resolution_clock::now();     
+
+
+
         // display images code here
 
         // Display the image
-        cv::imshow("Grayscale Image", image);
-        cv::imshow("Image Test", image_test);
+        // cv::imshow("Grayscale Image 1", image1);
+        // cv::imshow("Grayscale Image 2", image2);
+        // cv::imshow("Grayscale Image 3", image_mixed);
+        cv::imshow("Grayscale Image 3", transformedImg);   
+
+
+        
+
+        
+
+        // cv::imshow("Grayscale Image 3", image_mixed);
 
         // nneded for opencv loop
-        cv::waitKey(1);
+        int key = cv::waitKey(1);
+        if (key == 27)
+        { // ASCII code for the escape key
+            break;
+        }
+
+
+
+
+
 
 
         // check for long frame times
         end_check = std::chrono::high_resolution_clock::now();
         elapsed = end_check - start_check;
         start_check = std::chrono::high_resolution_clock::now();
-        if( elapsed.count()  > .04)
-            cout << "XXXXXXXXXXXXXXXXXX  " <<  elapsed.count()  << endl ;
+        if (elapsed.count() > .04)
+            cout << "XXXXXXXXXXXXXXXXXX  " << elapsed.count() << endl;
 
-
+        // cout << "XYYYYY " <<  elapsed_2.count()  << endl ;
 
         // for debugging
         auto current = SteadyClock::now();
@@ -218,6 +307,9 @@ int main(int argc, char *argv[])
         loop_sd.dump(out, "loop");
         out.close();
         // end debugging
+
+
+
     }
 
     return 0;
