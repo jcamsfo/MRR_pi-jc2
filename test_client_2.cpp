@@ -177,8 +177,12 @@ int main(int argc, char* argv[]) {
         // end debugging
     }
     
+
+    
     // give the server time to process the last sends before the connection is dropped
     this_thread::sleep_for(std::chrono::seconds(1));
+
+
     
     return 0;
 }

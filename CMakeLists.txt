@@ -21,26 +21,14 @@ find_package(Threads REQUIRED)
 
 include_directories(../)
 
-add_executable(${PROJECT_NAME}_server test_server.cpp comms.cpp comms.h)
-
-target_link_libraries(${PROJECT_NAME}_server ${CMAKE_THREAD_LIBS_INIT})
-
-
-add_executable(${PROJECT_NAME}_client test_client.cpp comms.cpp comms.h)
-
-target_link_libraries(${PROJECT_NAME}_client ${CMAKE_THREAD_LIBS_INIT})
-
 
 add_executable(${PROJECT_NAME}_server_2 test_server_2.cpp comms.cpp mixer_processor.cpp comms.h)
-
-# add_executable(${PROJECT_NAME}_server_2 mixer_processor.cpp)
 
 
 target_link_libraries(${PROJECT_NAME}_server_2 ${CMAKE_THREAD_LIBS_INIT})
 
 
 add_executable(${PROJECT_NAME}_client_2 test_client_2.cpp comms.cpp comms.h)
-
 
 
 target_link_libraries(${PROJECT_NAME}_client_2 ${CMAKE_THREAD_LIBS_INIT})
